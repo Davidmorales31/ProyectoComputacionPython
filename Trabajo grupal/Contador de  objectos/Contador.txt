@@ -1,0 +1,163 @@
+Código del contador
+import cv2
+from ultralytics import YOLO
+import requests
+import tkinter as tk
+from tkinter import messagebox
+
+# URL de la cámara IP para el streaming de video
+URL_CAMARA = "http://192.168.215.58:8080/video"
+
+# URL de la API para enviar los datos de conteo
+API_URL = "https://cdb1-2801-159-0-9227-d0be-215b-d408-908a.ngrok-free.app/insertar"
+
+# Carga el modelo YOLO para la detección de objetos
+model = YOLO('yolov8n.pt')  
+
+# Diccionario que define las categorías de objetos relevantes para detectar
+CLASES_RELEVANTES = {
+    "Frutas": ["apple", "banana", "orange", "grape", "watermelon"],  # Frutas específicas
+    "Personas": ["person"],  # Personas
+    "Todos": None  # Todas las clases disponibles en el modelo
+}
+
+def enviar_datos_a_api(nombre_objeto, tipo_medicion_id=4, resultado="0", estudiante_id=5):
+    """
+    Envía los datos del conteo a la API mediante una solicitud POST.
+
+    Args:
+        nombre_objeto (str): Nombre del tipo de objeto detectado.
+        tipo_medicion_id (int): ID que define el tipo de medición (por defecto, 4).
+        resultado (str): Resultado del conteo (por defecto, "0").
+        estudiante_id (int): ID del estudiante que realiza la medición (por defecto, 5).
+    """
+    datos = {
+        "fruta_objeto": nombre_objeto,
+        "tipo_medicion_id": tipo_medicion_id,
+        "resultado": resultado,
+        "estudiante_id": estudiante_id
+    }
+
+    try:
+        respuesta = requests.post(API_URL, json=datos)
+        if respuesta.status_code == 200:
+            print(f"Datos enviados exitosamente: {datos}")
+        else:
+            print(f"Error al enviar datos: {respuesta.status_code}, {respuesta.text}")
+    except Exception as e:
+        print(f"Error al conectar con la API: {e}")
+
+def contar_objetos_y_mostrar(frame, clases_relevantes=None):
+    """
+    Detecta objetos en el frame y los dibuja con sus etiquetas en la imagen.
+
+    Args:
+        frame: Frame de la cámara capturado para procesar.
+        clases_relevantes (list o None): Lista de clases relevantes para filtrar la detección.
+    
+    Returns:
+        tuple: Conteo de objetos detectados (dict) y el frame con las detecciones dibujadas.
+    """
+    results = model(frame)  # Realiza la detección
+    detecciones = results[0].boxes  # Obtiene las cajas de detección
+    nombres_clases = model.names  # Obtiene los nombres de las clases desde el modelo
+    conteo = {}  # Diccionario para contar las clases detectadas
+
+    for box in detecciones:
+        # Extraer información de la detección
+        clase = int(box.cls[0])  # Índice de la clase detectada
+        etiqueta = nombres_clases[clase]  # Nombre de la clase
+        x1, y1, x2, y2 = map(int, box.xyxy[0])  # Coordenadas de la caja delimitadora
+
+        # Filtrar según las clases relevantes
+        if clases_relevantes is None or etiqueta in clases_relevantes:
+            conteo[etiqueta] = conteo.get(etiqueta, 0) + 1
+
+            # Dibujar la caja y la etiqueta en el frame
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, etiqueta, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    return conteo, frame
+
+def iniciar_camara(clases_relevantes, tipo_objeto):
+    """
+    Inicia el procesamiento de video desde la cámara, detecta objetos y envía el conteo final.
+
+    Args:
+        clases_relevantes (list o None): Clases relevantes a detectar.
+        tipo_objeto (str): Nombre del tipo de objeto detectado (usado al enviar a la API).
+    """
+    cap = cv2.VideoCapture(URL_CAMARA)  # Inicia la captura de video desde la URL de la cámara
+    print("Presiona 'q' para salir...")
+
+    conteo_final = 0  # Almacena el conteo final de objetos detectados
+
+    while True:
+        ret, frame = cap.read()  # Lee un frame de la cámara
+        if not ret:
+            print("No se pudo capturar el cuadro.")
+            break
+
+        # Detectar objetos en el frame actual
+        conteo_actual, frame_con_detecciones = contar_objetos_y_mostrar(frame, clases_relevantes)
+
+        conteo_final = sum(conteo_actual.values())  # Suma los objetos detectados en cada iteración
+
+        # Mostrar el frame con detecciones
+        cv2.imshow("Detección de Objetos", frame_con_detecciones)
+
+        # Salir si se presiona la tecla 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    print(f"Conteo final: {conteo_final}")
+    enviar_datos_a_api(tipo_objeto, resultado=str(conteo_final))  # Enviar los datos a la API
+
+    cap.release()  # Liberar la cámara
+    cv2.destroyAllWindows()  # Cerrar todas las ventanas de OpenCV
+
+def iniciar_deteccion(opcion):
+    """
+    Valida la opción seleccionada y comienza la detección para la categoría correspondiente.
+
+    Args:
+        opcion (str): Categoría seleccionada por el usuario.
+    """
+    if opcion not in CLASES_RELEVANTES:
+        messagebox.showerror("Error", "Opción seleccionada no válida.")
+        return
+
+    clases_relevantes = CLASES_RELEVANTES[opcion]
+    print(f"Iniciando detección para: {opcion}")
+    iniciar_camara(clases_relevantes, opcion)
+
+def crear_interfaz():
+    """
+    Crea una interfaz gráfica para que el usuario seleccione la categoría de objetos a contar.
+    """
+    def manejar_seleccion():
+        # Obtiene la opción seleccionada y llama a la función de detección
+        opcion = opcion_seleccionada.get()
+        if opcion:
+            iniciar_deteccion(opcion)
+        else:
+            messagebox.showwarning("Advertencia", "Por favor, selecciona una opción antes de continuar.")
+
+    ventana = tk.Tk()
+    ventana.title("Selector de Conteo")
+    ventana.geometry("400x300")
+
+    etiqueta = tk.Label(ventana, text="¿Qué deseas contar?", font=("Arial", 14))
+    etiqueta.pack(pady=10)
+
+    opcion_seleccionada = tk.StringVar()
+    for opcion in CLASES_RELEVANTES.keys():
+        tk.Radiobutton(ventana, text=opcion, variable=opcion_seleccionada, value=opcion).pack(anchor=tk.W)
+
+    boton = tk.Button(ventana, text="Iniciar", command=manejar_seleccion, bg="green", fg="white")
+    boton.pack(pady=20)
+
+    ventana.mainloop()
+
+# Inicia la interfaz gráfica
+crear_interfaz()

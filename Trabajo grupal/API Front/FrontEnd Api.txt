@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interfaz de Resultados</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #4a90e2;
+        }
+        h1 {
+            margin-top: 20px;
+            font-size: 2.5rem;
+        }
+        h2 {
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+        }
+        .table-container, .chart-container {
+            width: 90%;
+            max-width: 1200px;
+            margin: 30px auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #4a90e2;
+            color: #fff;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #e6f7ff;
+        }
+        td {
+            font-size: 0.9rem;
+            color: #555;
+        }
+        table caption {
+            caption-side: top;
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: #333;
+        }
+        @media (max-width: 768px) {
+            table {
+                font-size: 0.85rem;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Interfaz de Resultados de Mediciones</h1>
+
+    <div class="table-container">
+        <h2>Resultados</h2>
+        <table id="resultados_table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Fruta u Objeto</th>
+                    <th>Tipo de Medición</th>
+                    <th>Resultado</th>
+                    <th>Estudiante</th>
+                    <th>Fecha</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="table-container">
+        <h2>Tipos de Medición</h2>
+        <table id="tipos_medicion_table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Descripción</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="table-container">
+        <h2>Estudiantes</h2>
+        <table id="estudiantes_table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="table-container">
+        <h2>Gráfica General de Resultados</h2>
+        <canvas id="resultadosChart" width="400" height="200"></canvas>
+    </div>
+
+    <div id="graficas_estudiantes"></div>
+
+    <script>
+        function obtenerDatos() {
+            fetch('/obtener_datos')
+                .then(response => response.json())
+                .then(data => {
+                    actualizarTablas(data);
+                    crearGraficaGeneral(data.resultados, data.estudiantes);
+                    crearGraficasPorEstudiante(data.resultados, data.estudiantes);
+                })
+                .catch(error => console.log('Error:', error));
+        }
+
+        function actualizarTablas(data) {
+            let resultadosTable = document.getElementById('resultados_table').getElementsByTagName('tbody')[0];
+            data.resultados.forEach(resultado => {
+                let row = resultadosTable.insertRow();
+                row.innerHTML = `    
+                    <td>${resultado[0]}</td>
+                    <td>${resultado[1]}</td>
+                    <td>${data.tipos_medicion.find(tipo => tipo[0] == resultado[2])[1]}</td>
+                    <td>${resultado[3]}</td>
+                    <td>${data.estudiantes.find(estudiante => estudiante[0] == resultado[4])[1]}</td>
+                    <td>${resultado[5]}</td>
+                `;
+            });
+
+            let tiposMedicionTable = document.getElementById('tipos_medicion_table').getElementsByTagName('tbody')[0];
+            data.tipos_medicion.forEach(tipo => {
+                let row = tiposMedicionTable.insertRow();
+                row.innerHTML = `<td>${tipo[0]}</td><td>${tipo[1]}</td>`;
+            });
+
+            let estudiantesTable = document.getElementById('estudiantes_table').getElementsByTagName('tbody')[0];
+            data.estudiantes.forEach(estudiante => {
+                let row = estudiantesTable.insertRow();
+                row.innerHTML = `<td>${estudiante[0]}</td><td>${estudiante[1]}</td>`;
+            });
+        }
+
+        function crearGraficaGeneral(resultados, estudiantes) {
+            const nombresEstudiantes = estudiantes.map(est => est[1]);
+            const resultadosPorEstudiante = estudiantes.map(est => 
+                resultados.filter(res => res[4] == est[0]).length
+            );
+
+            const ctx = document.getElementById('resultadosChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: nombresEstudiantes,
+                    datasets: [{
+                        label: 'Resultados por Estudiante',
+                        data: resultadosPorEstudiante,
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { beginAtZero: true, title: { display: true, text: 'Cantidad de Resultados' } },
+                        x: { title: { display: true, text: 'Estudiantes' } }
+                    }
+                }
+            });
+        }
+
+        function crearGraficasPorEstudiante(resultados, estudiantes) {
+            const contenedor = document.getElementById('graficas_estudiantes');
+            estudiantes.forEach(est => {
+                const resultadosEstudiante = resultados.filter(res => res[4] == est[0]);
+                const datosPorHora = resultadosEstudiante.map(res => {
+                    const fecha = new Date(res[5]);
+                    const hora = fecha.getHours();
+                    const minutos = Math.floor(fecha.getMinutes() / 3) * 3; // Redondea al intervalo de 3 minutos
+                    const horaFormateada = `${hora}:${minutos < 10 ? '0' : ''}${minutos}`;
+                    return { hora: horaFormateada, cantidad: 1 };
+                });
+
+                // Agrupar los resultados por hora (intervalos de 3 minutos)
+                const horasAgrupadas = datosPorHora.reduce((acc, dato) => {
+                    acc[dato.hora] = (acc[dato.hora] || 0) + dato.cantidad;
+                    return acc;
+                }, {});
+
+                const horasOrdenadas = Object.keys(horasAgrupadas).sort();
+                const cantidadesOrdenadas = horasOrdenadas.map(hora => horasAgrupadas[hora]);
+
+                const chartContainer = document.createElement('div');
+                chartContainer.classList.add('chart-container');
+                chartContainer.innerHTML = `<h2>Resultados de ${est[1]}</h2><canvas id="chart_${est[0]}"></canvas>`;
+                contenedor.appendChild(chartContainer);
+
+                const ctx = document.getElementById(`chart_${est[0]}`).getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: horasOrdenadas,
+                        datasets: [{
+                            label: 'Registros por Intervalo de Hora',
+                            data: cantidadesOrdenadas,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { beginAtZero: true, title: { display: true, text: 'Cantidad de Registros' } },
+                            x: { title: { display: true, text: 'Hora' } }
+                        }
+                    }
+                });
+            });
+        }
+
+        // Llamada a la función para obtener los datos cuando la página se carga
+        obtenerDatos();
+    </script>
+</body>
+</html>

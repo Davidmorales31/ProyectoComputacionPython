@@ -1,0 +1,117 @@
+from flask import Flask, render_template, jsonify, request
+import psycopg2
+
+app = Flask(__name__, template_folder=r'C:\Users\USER\Desktop\UNIVERSIDAD\COMPUTACION FISICA\API-BACKEND\.venv\templates')
+
+
+# Configuración de conexión a PostgreSQL
+DB_HOST = "localhost"
+DB_NAME = "db_frutas_api"
+DB_USER = "postgres"
+DB_PASSWORD = "David31@."
+
+def connect_db():
+    """Establece conexión con la base de datos."""
+    return psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+@app.route('/')
+def home():
+    """Renderiza la página principal."""
+    return render_template('index.html')  # Sirve el archivo index.html
+
+@app.route('/obtener_datos', methods=['GET'])
+def obtener_datos():
+    """Obtiene los datos de las tres tablas para la interfaz gráfica."""
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+
+        # Obtener datos de la tabla resultados
+        cursor.execute("SELECT * FROM resultados_medicion")
+        resultados = cursor.fetchall()
+
+        # Obtener datos de la tabla tipos_medicion
+        cursor.execute("SELECT * FROM tipos_medicion")
+        tipos_medicion = cursor.fetchall()
+
+        # Obtener datos de la tabla estudiantes
+        cursor.execute("SELECT * FROM estudiantes")
+        estudiantes = cursor.fetchall()
+
+        # Cerrar conexión
+        cursor.close()
+        conn.close()
+
+        # Retornar los datos como JSON
+        return jsonify({
+            "resultados": resultados,
+            "tipos_medicion": tipos_medicion,
+            "estudiantes": estudiantes
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/insertar', methods=['POST'])
+def insertar_resultado():
+    """Inserta un nuevo resultado de medición en la base de datos y devuelve detalles."""
+    try:
+        # Obtener datos del cuerpo de la solicitud (JSON)
+        data = request.json
+        fruta_objeto = data.get('fruta_objeto')
+        tipo_medicion_id = data.get('tipo_medicion_id')
+        resultado = data.get('resultado')
+        estudiante_id = data.get('estudiante_id')
+
+        # Validar que los datos requeridos estén presentes
+        if not fruta_objeto or not tipo_medicion_id or not resultado or not estudiante_id:
+            return jsonify({"error": "Faltan campos requeridos"}), 400
+
+        # Conectar a la base de datos
+        conn = connect_db()
+        cursor = conn.cursor()
+
+        # Validar que el tipo_medicion_id exista en la tabla tipos_medicion
+        cursor.execute("SELECT descripcion FROM tipos_medicion WHERE id = %s", (tipo_medicion_id,))
+        tipo_medicion = cursor.fetchone()
+        if not tipo_medicion:
+            return jsonify({"error": "El ID del tipo de medición no existe"}), 400
+
+        # Validar que el estudiante_id exista en la tabla estudiantes
+        cursor.execute("SELECT nombre FROM estudiantes WHERE id = %s", (estudiante_id,))
+        estudiante = cursor.fetchone()
+        if not estudiante:
+            return jsonify({"error": "El ID del estudiante no existe"}), 400
+
+        # Insertar el nuevo registro
+        insert_query = """
+            INSERT INTO resultados_medicion (fruta_objeto, tipo_medicion_id, resultado, estudiante_id)
+            VALUES (%s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (fruta_objeto, tipo_medicion_id, resultado, estudiante_id))
+        conn.commit()
+
+        # Cerrar conexión
+        cursor.close()
+        conn.close()
+
+        # Responder con el texto del tipo de medición y el nombre del estudiante
+        return jsonify({
+            "message": "Resultado insertado correctamente",
+            "datos_insertados": {
+                "fruta_objeto": fruta_objeto,
+                "tipo_medicion": tipo_medicion[0],  # El texto relacionado al tipo de medición
+                "resultado": resultado,
+                "estudiante": estudiante[0],  # El nombre del estudiante
+            }
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+  app.run(debug=True, host="0.0.0.0", port=5000)

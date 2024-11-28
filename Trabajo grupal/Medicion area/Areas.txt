@@ -1,0 +1,138 @@
+from scipy.spatial import distance as dist  # Importa una función para calcular distancias euclidianas
+from imutils import perspective  # Herramienta para ajustar la perspectiva de contornos
+from imutils import contours  # Función para ordenar contornos
+import numpy as np  # Biblioteca para operaciones numéricas
+import imutils  # Biblioteca para procesamiento de imágenes
+import cv2  # Biblioteca para visión por computadora
+import requests  # Biblioteca para realizar solicitudes HTTP
+
+# Función para calcular el punto medio entre dos puntos
+def midpoint(ptA, ptB)
+    return ((ptA[0] + ptB[0])  0.5, (ptA[1] + ptB[1])  0.5)
+
+# Dimensión conocida del objeto de referencia en cm² (7.5 cm x 7.5 cm)
+KNOWN_AREA = 56.25  
+
+# Inicializar la cámara (cámara externa está en el índice 2)
+camera = cv2.VideoCapture(2)
+
+# Variable para la relación píxelescm y factor de calibración
+pixelsPerMetric = None
+calibration_factor = 1  # Inicialmente sin ajuste
+
+# Bucle principal para procesamiento en tiempo real
+while True
+    # Capturar un frame de la cámara
+    ret, frame = camera.read()
+    if not ret  # Si no se puede capturar un frame, salir del bucle
+        break
+    
+    # Copia del frame original para procesar sin afectar el original
+    orig = frame.copy()
+    
+    # Convertir el frame a escala de grises y aplicar desenfoque para reducir el ruido
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (7, 7), 0)
+    
+    # Detectar bordes usando Canny y aplicar transformaciones morfológicas
+    edged = cv2.Canny(gray, 30, 70)
+    edged = cv2.dilate(edged, None, iterations=2)  # Agrandar bordes
+    edged = cv2.erode(edged, None, iterations=1)  # Reducir ruido en bordes
+    
+    # Encontrar contornos en la imagen de bordes
+    cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+    
+    # Ordenar los contornos de izquierda a derecha
+    if len(cnts)  0
+        (cnts, _) = contours.sort_contours(cnts)
+    
+    # Procesar cada contorno encontrado
+    for c in cnts
+        # Ignorar contornos pequeños
+        if cv2.contourArea(c)  500
+            continue
+        
+        # Calcular el cuadro delimitador rotado del contorno
+        box = cv2.minAreaRect(c)
+        box = cv2.boxPoints(box) if imutils.is_cv3() else cv2.boxPoints(box)
+        box = np.array(box, dtype=int)
+        box = perspective.order_points(box)
+        
+        # Dibujar el contorno y puntos del cuadro delimitador
+        cv2.drawContours(orig, [box.astype(int)], -1, (0, 255, 0), 2)
+        for (x, y) in box
+            cv2.circle(orig, (int(x), int(y)), 5, (0, 0, 255), -1)
+        
+        # Calcular puntos medios de los lados del cuadro
+        (tl, tr, br, bl) = box
+        (tltrX, tltrY) = midpoint(tl, tr)
+        (blbrX, blbrY) = midpoint(bl, br)
+        (tlblX, tlblY) = midpoint(tl, bl)
+        (trbrX, trbrY) = midpoint(tr, br)
+        
+        # Dibujar puntos medios y conectar líneas entre ellos
+        cv2.circle(orig, (int(tltrX), int(tltrY)), 5, (255, 0, 0), -1)
+        cv2.circle(orig, (int(blbrX), int(blbrY)), 5, (255, 0, 0), -1)
+        cv2.circle(orig, (int(tlblX), int(tlblY)), 5, (255, 0, 0), -1)
+        cv2.circle(orig, (int(trbrX), int(trbrY)), 5, (255, 0, 0), -1)
+        cv2.line(orig, (int(tltrX), int(tltrY)), (int(blbrX), int(blbrY)), (255, 0, 255), 2)
+        cv2.line(orig, (int(tlblX), int(tlblY)), (int(trbrX), int(trbrY)), (255, 0, 255), 2)
+        
+        # Calcular distancias euclidianas entre puntos medios
+        dA = dist.euclidean((tltrX, tltrY), (blbrX, blbrY))
+        dB = dist.euclidean((tlblX, tlblY), (trbrX, trbrY))
+        
+        # Calibrar relación píxelescm si aún no está establecida
+        if pixelsPerMetric is None
+            measured_area = dA  dB  # Área medida en píxeles²
+            calibration_factor = (KNOWN_AREA  measured_area)  0.15
+            pixelsPerMetric = dB  calibration_factor  7.5
+            cv2.putText(orig, Ref. Area {.1f} px.format(KNOWN_AREA),
+                        (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            continue  # No procesar otros objetos hasta calibrar
+        
+        # Calcular dimensiones reales del objeto en cm
+        dimA = dA  pixelsPerMetric
+        dimB = dB  pixelsPerMetric
+        area = dimA  dimB  # Área en cm²
+        
+        # Mostrar las dimensiones y el área del objeto
+        cv2.putText(orig, {.1f}cm.format(dimA),
+                    (int(tltrX - 15), int(tltrY - 10)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65, (255, 255, 255), 2)
+        cv2.putText(orig, {.1f}cm.format(dimB),
+                    (int(trbrX + 10), int(trbrY)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65, (255, 255, 255), 2)
+        cv2.putText(orig, {.1f} cm^2.format(area),
+                    (int(tltrX), int(tltrY - 30)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7, (255, 255, 255), 2)
+        
+        # Enviar datos del objeto a la API al presionar 'g'
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('g')
+            payload = {
+                fruta_objeto Objeto detectado,
+                tipo_medicion_id 3,
+                resultado fÁrea {area.1f} cm^2,
+                estudiante_id 6
+            }
+            try
+                response = requests.post(
+                    httpscdb1-2801-159-0-9227-d0be-215b-d408-908a.ngrok-free.appinsertar,
+                    json=payload
+                )
+                print(fAPI Response {response.status_code}, {response.text})
+            except Exception as e
+                print(fError al enviar datos a la API {e})
+    
+    # Mostrar la imagen procesada en tiempo real
+    cv2.imshow(Frame, orig)
+    
+    # Salir del bucle al presionar 'q'
+    if cv2.waitKey(1) & 0xFF == ord('q')
+        break
+
+# Liberar la cámara y cerrar ventanas
+camera.release()
+cv2.destroyAllWindows()
